@@ -2413,7 +2413,7 @@ function PracticeScreen({
 
   const gradePhoto = async () => {
     if (!photoPreview || !photoMimeType) {
-      setPhotoGradeError("Upload a photo of your handwritten answer first.");
+      setPhotoGradeError("Upload a photo for Kinetic Vision first.");
       return;
     }
 
@@ -2602,13 +2602,13 @@ function PracticeScreen({
       <div className="rounded-2xl border border-blue-400/20 bg-[#1E293B] p-4 shadow-[0_18px_50px_rgba(2,6,23,0.26)]">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-sm font-black text-white">Photo Upload + AI Grading</p>
+            <p className="text-sm font-black text-white">Kinetic Vision</p>
             <p className="mt-1 text-xs font-bold leading-5 text-slate-400">
-              Upload handwritten work and Kinetic AI will grade it against the question.
+              Upload handwritten work and Kinetic Vision will grade it against the question.
             </p>
           </div>
           <span className="rounded-full bg-blue-500/15 px-3 py-1 text-xs font-black text-blue-200">
-            Gemini vision
+            AI vision
           </span>
         </div>
 
@@ -2626,7 +2626,7 @@ function PracticeScreen({
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={photoPreview}
-              alt="Uploaded handwritten answer preview"
+              alt="Kinetic Vision handwritten answer preview"
               className="mx-auto max-h-56 w-full rounded-2xl object-contain"
             />
           ) : (
@@ -2692,7 +2692,7 @@ function PracticeScreen({
         ) : null}
 
         <DemoButton className="mt-3 w-full" onClick={gradePhoto} disabled={photoGradeLoading}>
-          {photoGradeLoading ? "Grading handwriting..." : "Grade My Written Work"}
+          {photoGradeLoading ? "Kinetic Vision is grading..." : "Grade with Kinetic Vision"}
         </DemoButton>
       </div>
 
