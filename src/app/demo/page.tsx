@@ -5,13 +5,16 @@ import {
   ArrowLeft,
   Bell,
   CalendarDays,
+  Camera,
   Check,
   ChevronRight,
   Clock,
+  ImagePlus,
   Home,
   Lock,
   LogOut,
   Mail,
+  Pencil,
   Send,
   Settings,
   Sparkles,
@@ -132,6 +135,13 @@ type PhotoGradeApiPayload = {
     explanation: string;
   };
 };
+
+type ProfilePicturePayload = {
+  studentId: string;
+  imageBase64: string | null;
+};
+
+const DEMO_STUDENT_ID = "demo-zarif-student";
 
 const BRAND = "#1A56DB";
 const GREEN = "#0E9F6E";
@@ -468,6 +478,46 @@ function readFileAsDataUrl(file: File) {
     reader.onload = () => resolve(String(reader.result ?? ""));
     reader.onerror = () => reject(new Error("Could not read the selected image."));
     reader.readAsDataURL(file);
+  });
+}
+
+function resizeImageForProfile(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    if (!file.type.startsWith("image/")) {
+      reject(new Error("Choose a valid image file."));
+      return;
+    }
+
+    const image = new Image();
+    const objectUrl = URL.createObjectURL(file);
+
+    image.onload = () => {
+      const maxSize = 400;
+      const scale = Math.min(maxSize / image.width, maxSize / image.height, 1);
+      const width = Math.max(1, Math.round(image.width * scale));
+      const height = Math.max(1, Math.round(image.height * scale));
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+
+      URL.revokeObjectURL(objectUrl);
+
+      if (!context) {
+        reject(new Error("Could not prepare the image preview."));
+        return;
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+      context.drawImage(image, 0, 0, width, height);
+      resolve(canvas.toDataURL("image/jpeg", 0.8));
+    };
+
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Could not open this image. Try another photo."));
+    };
+
+    image.src = objectUrl;
   });
 }
 
@@ -1444,6 +1494,32 @@ function StatCard({
   );
 }
 
+function StudentAvatar({
+  imageBase64,
+  initials = "Z",
+  className,
+}: {
+  imageBase64: string | null;
+  initials?: string;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "grid shrink-0 place-items-center overflow-hidden rounded-full border-4 border-blue-400 bg-[#0F172A] font-black text-white",
+        className ?? "size-16 text-xl",
+      )}
+    >
+      {imageBase64 ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={imageBase64} alt="Student profile" className="h-full w-full object-cover" />
+      ) : (
+        initials
+      )}
+    </div>
+  );
+}
+
 function CountdownRing({ percent }: { percent: number }) {
   const radius = 24;
   const circumference = 2 * Math.PI * radius;
@@ -1882,12 +1958,14 @@ function DashboardScreen({
   streakAtRisk,
   journeyAdvanced,
   studyPlan,
+  profilePicture,
 }: {
   startPractice: (origin: PracticeOrigin, topic: string) => void;
   setScreen: (screen: Screen) => void;
   streakAtRisk: boolean;
   journeyAdvanced: boolean;
   studyPlan: StudyPlan;
+  profilePicture: string | null;
 }) {
   const xp = useCountUp(2340, 1500, "dashboard-xp");
   const streak = useCountUp(7, 900, "dashboard-streak");
@@ -1952,9 +2030,8 @@ function DashboardScreen({
             <motion.div
               animate={{ boxShadow: ["0 0 0 #1A56DB00", "0 0 28px #60A5FAAA", "0 0 0 #1A56DB00"] }}
               transition={{ duration: 2, repeat: Infinity }}
-              className="grid size-16 place-items-center rounded-full border-4 border-blue-300 bg-[#1E293B] text-xl font-black text-white"
             >
-              Z
+              <StudentAvatar imageBase64={profilePicture} className="size-16 border-blue-300 text-xl" />
             </motion.div>
             <div className="absolute -right-1 -top-1 grid size-8 place-items-center rounded-full bg-[#0F172A] text-blue-200 ring-2 ring-blue-300">
               <Bell className="size-4" />
@@ -3382,13 +3459,67 @@ function MentorsScreen({ setScreen }: { setScreen: (screen: Screen) => void }) {
   );
 }
 
-function ProfileScreen({ setScreen }: { setScreen: (screen: Screen) => void }) {
+function ProfileScreen({
+  setScreen,
+  profilePicture,
+  onProfilePictureChange,
+}: {
+  setScreen: (screen: Screen) => void;
+  profilePicture: string | null;
+  onProfilePictureChange: (imageBase64: string | null) => void;
+}) {
+  const [chooserOpen, setChooserOpen] = useState(false);
+  const [pendingPreview, setPendingPreview] = useState<string | null>(null);
+  const [pictureError, setPictureError] = useState("");
+  const [savingPicture, setSavingPicture] = useState(false);
   const rows = [
     "Notification Settings",
     "Exam Target",
     "Language (বাংলা / English)",
     "About Kinetic Academy",
   ];
+
+  const selectProfileFile = async (file: File | undefined) => {
+    setChooserOpen(false);
+    setPictureError("");
+
+    if (!file) {
+      return;
+    }
+
+    try {
+      const resizedImage = await resizeImageForProfile(file);
+      setPendingPreview(resizedImage);
+    } catch (cause) {
+      setPendingPreview(null);
+      setPictureError(cause instanceof Error ? cause.message : "Could not prepare this photo.");
+    }
+  };
+
+  const saveProfilePicture = async () => {
+    if (!pendingPreview) {
+      return;
+    }
+
+    setSavingPicture(true);
+    setPictureError("");
+
+    const payload = await postApi<ProfilePicturePayload>("/api/profile/picture", {
+      studentId: DEMO_STUDENT_ID,
+      imageBase64: pendingPreview,
+    });
+
+    setSavingPicture(false);
+
+    if (!payload.success) {
+      setPictureError(payload.error.message || "Could not save profile picture.");
+      return;
+    }
+
+    onProfilePictureChange(payload.data.imageBase64);
+    setPendingPreview(null);
+    toast.success("Profile picture updated");
+  };
 
   return (
     <ScreenFrame>
@@ -3398,14 +3529,86 @@ function ProfileScreen({ setScreen }: { setScreen: (screen: Screen) => void }) {
       </header>
       <GameCard className="p-5">
         <div className="flex items-center gap-4">
-          <div className="grid size-20 place-items-center rounded-full border-4 border-blue-400 bg-[#0F172A] text-3xl font-black text-white">
-            Z
+          <div className="relative">
+            <StudentAvatar imageBase64={profilePicture} className="size-20 text-3xl" />
+            <button
+              type="button"
+              onClick={() => setChooserOpen((open) => !open)}
+              className="absolute -bottom-1 -right-1 grid size-9 place-items-center rounded-full bg-[#1A56DB] text-white shadow-[0_0_24px_rgba(26,86,219,0.45)] ring-4 ring-[#1E293B]"
+              aria-label="Edit profile picture"
+            >
+              <Pencil className="size-4" />
+            </button>
+            <AnimatePresence>
+              {chooserOpen ? (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.92, y: 8 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.92, y: 8 }}
+                  className="absolute left-0 top-24 z-40 w-56 overflow-hidden rounded-2xl border border-white/10 bg-[#0F172A] shadow-[0_22px_60px_rgba(2,6,23,0.7)]"
+                >
+                  <label className="flex cursor-pointer items-center gap-3 border-b border-white/5 px-4 py-3 text-sm font-black text-slate-100">
+                    <ImagePlus className="size-4 text-blue-300" />
+                    Choose from Gallery
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="sr-only"
+                      onChange={(event) => {
+                        void selectProfileFile(event.target.files?.[0]);
+                        event.currentTarget.value = "";
+                      }}
+                    />
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-3 px-4 py-3 text-sm font-black text-slate-100">
+                    <Camera className="size-4 text-blue-300" />
+                    Take a Selfie
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="user"
+                      className="sr-only"
+                      onChange={(event) => {
+                        void selectProfileFile(event.target.files?.[0]);
+                        event.currentTarget.value = "";
+                      }}
+                    />
+                  </label>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
           </div>
           <div>
             <p className="text-xl font-black text-white">Zarif Ahmed</p>
             <p className="text-sm font-bold text-slate-400">IBA Aspirant • Joined May 2026</p>
           </div>
         </div>
+        {pictureError ? (
+          <p className="mt-4 rounded-2xl bg-red-500/10 p-3 text-sm font-bold leading-6 text-red-100">
+            {pictureError}
+          </p>
+        ) : null}
+        {pendingPreview ? (
+          <div className="mt-5 rounded-2xl border border-blue-400/20 bg-slate-900/60 p-4">
+            <p className="text-sm font-black text-white">Preview new profile picture</p>
+            <div className="mt-4 flex items-center gap-4">
+              <StudentAvatar imageBase64={pendingPreview} className="size-24 text-3xl" />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold leading-5 text-slate-400">
+                  The image was resized to a lightweight 400px JPEG before upload.
+                </p>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <DemoButton variant="outline" onClick={() => setPendingPreview(null)} disabled={savingPicture}>
+                    Cancel
+                  </DemoButton>
+                  <DemoButton onClick={saveProfilePicture} disabled={savingPicture}>
+                    {savingPicture ? "Saving..." : "Save"}
+                  </DemoButton>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
         <div className="mt-5 grid grid-cols-3 gap-2">
           {[
             ["7", "day streak"],
@@ -3539,7 +3742,28 @@ export default function KineticAcademyDemoPage() {
   const [streakAtRisk] = useState(() => new Date().getHours() >= 20);
   const [authEmail, setAuthEmail] = useState("");
   const [authNotice, setAuthNotice] = useState<AuthNotice | null>(null);
+  const [profilePicture, setProfilePicture] = useState<string | null>(null);
   const { muted, setMuted, play } = useSound();
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadProfilePicture = async () => {
+      const payload = await fetch(`/api/profile/picture/${encodeURIComponent(DEMO_STUDENT_ID)}`)
+        .then((response) => response.json() as Promise<ApiResponse<ProfilePicturePayload>>)
+        .catch(() => null);
+
+      if (!cancelled && payload?.success) {
+        setProfilePicture(payload.data.imageBase64);
+      }
+    };
+
+    void loadProfilePicture();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -3667,6 +3891,7 @@ export default function KineticAcademyDemoPage() {
               streakAtRisk={streakAtRisk}
               journeyAdvanced={journeyAdvanced}
               studyPlan={studyPlan}
+              profilePicture={profilePicture}
             />
           ) : null}
           {screen === "countdown" ? (
@@ -3701,7 +3926,14 @@ export default function KineticAcademyDemoPage() {
           ) : null}
           {screen === "mentors" ? <MentorsScreen key="mentors" setScreen={setScreen} /> : null}
           {screen === "feynman" ? <FeynmanScreen key="feynman" setScreen={setScreen} /> : null}
-          {screen === "profile" ? <ProfileScreen key="profile" setScreen={setScreen} /> : null}
+          {screen === "profile" ? (
+            <ProfileScreen
+              key="profile"
+              setScreen={setScreen}
+              profilePicture={profilePicture}
+              onProfilePictureChange={setProfilePicture}
+            />
+          ) : null}
         </AnimatePresence>
         {!["loading", "login", "email-verification", "onboarding", "path-building", "feynman"].includes(screen) ? (
           <BottomNav screen={screen} setScreen={navigate} newUnlock={newUnlock} />
