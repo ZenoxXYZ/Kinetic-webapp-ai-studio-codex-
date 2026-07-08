@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { defineConfig, env } from "prisma/config";
+import { defineConfig } from "prisma/config";
 
 const envPaths = [resolve(process.cwd(), ".env"), resolve(process.cwd(), ".env.local")];
 const runtime = globalThis as typeof globalThis & {
@@ -44,6 +44,7 @@ function readDotenvValues() {
 }
 
 const dotenvValues = readDotenvValues();
+const fallbackDatabaseUrl = "postgresql://user:password@localhost:5432/kinetic_academy";
 
 for (const [key, value] of dotenvValues) {
   const runtimeEnv = runtime.process?.["env"];
@@ -53,10 +54,18 @@ for (const [key, value] of dotenvValues) {
   }
 }
 
+const runtimeEnv = runtime.process?.["env"];
+const databaseUrl = dotenvValues.get("DATABASE_URL") ?? runtimeEnv?.DATABASE_URL ?? fallbackDatabaseUrl;
+
+if (runtimeEnv) {
+  runtimeEnv.DATABASE_URL = databaseUrl;
+  runtimeEnv.DIRECT_URL = dotenvValues.get("DIRECT_URL") ?? runtimeEnv.DIRECT_URL ?? databaseUrl;
+}
+
 export default defineConfig({
   schema: "./prisma/schema.prisma",
   datasource: {
-    url: dotenvValues.get("DATABASE_URL") ?? env("DATABASE_URL"),
+    url: databaseUrl,
   },
   migrations: {
     seed: "tsx prisma/seed.ts",
