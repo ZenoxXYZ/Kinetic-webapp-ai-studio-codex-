@@ -122,6 +122,22 @@ export const dailyExamResponseSchema = z.object({
   questions: z.array(dailyExamQuestionSchema).min(3).max(8),
 });
 
+export const photoGradeRequestSchema = z.object({
+  imageBase64: z
+    .string()
+    .min(120, "Upload a clear image of the handwritten work")
+    .max(8_000_000, "Image is too large. Please upload an image under 6MB."),
+  mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
+  rubric: z.string().min(8, "Add the question or grading rubric").max(2500),
+});
+
+export const photoGradeResponseSchema = z.object({
+  score: z.number().int().min(0).max(100),
+  correct: z.array(z.string().min(1).max(240)).max(8),
+  wrong: z.array(z.string().min(1).max(240)).max(8),
+  explanation: z.string().min(1).max(1200),
+});
+
 export type FeynmanRequest = z.infer<typeof feynmanRequestSchema>;
 export type FeynmanResponse = z.infer<typeof feynmanResponseSchema>;
 export type SocraticRequest = z.infer<typeof socraticRequestSchema>;
@@ -136,6 +152,8 @@ export type StudyPlanRequest = z.infer<typeof studyPlanRequestSchema>;
 export type StudyPlanResponse = z.infer<typeof studyPlanResponseSchema>;
 export type DailyExamRequest = z.infer<typeof dailyExamRequestSchema>;
 export type DailyExamResponse = z.infer<typeof dailyExamResponseSchema>;
+export type PhotoGradeRequest = z.infer<typeof photoGradeRequestSchema>;
+export type PhotoGradeResponse = z.infer<typeof photoGradeResponseSchema>;
 
 export const feynmanGeminiSchema = {
   type: "OBJECT",
@@ -245,4 +263,15 @@ export const dailyExamGeminiSchema = {
     },
   },
   required: ["title", "questions"],
+};
+
+export const photoGradeGeminiSchema = {
+  type: "OBJECT",
+  properties: {
+    score: { type: "INTEGER" },
+    correct: { type: "ARRAY", items: { type: "STRING" } },
+    wrong: { type: "ARRAY", items: { type: "STRING" } },
+    explanation: { type: "STRING" },
+  },
+  required: ["score", "correct", "wrong", "explanation"],
 };

@@ -15,6 +15,11 @@ type GeminiJsonArgs<T> = {
   context: string;
 };
 
+type GeminiImageJsonArgs<T> = GeminiJsonArgs<T> & {
+  imageBase64: string;
+  mimeType: string;
+};
+
 let client: GoogleGenAI | null = null;
 
 function getClient() {
@@ -80,6 +85,67 @@ export async function generateGeminiJson<T>({
       }
 
       logger.error(context, "Gemini request failed; using local cognitive rubric", { error });
+    }
+  }
+
+  return { provider: "local-rubric", model: "deterministic-v1", data: fallback() };
+}
+
+export async function generateGeminiImageJson<T>({
+  systemInstruction,
+  prompt,
+  imageBase64,
+  mimeType,
+  responseSchema,
+  validator,
+  fallback,
+  context,
+}: GeminiImageJsonArgs<T>) {
+  const ai = getClient();
+
+  if (!ai) {
+    logger.warn(context, "Gemini API key not configured; using local image grading fallback");
+    return { provider: "local-rubric", model: "deterministic-v1", data: fallback() };
+  }
+
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      const response = await ai.models.generateContent({
+        model: DEFAULT_MODEL,
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { text: prompt },
+              {
+                inlineData: {
+                  mimeType,
+                  data: imageBase64,
+                },
+              },
+            ],
+          },
+        ],
+        config: {
+          systemInstruction,
+          responseMimeType: "application/json",
+          responseSchema,
+          temperature: 0.15,
+        },
+      });
+      const text = response.text ?? "";
+      const data = validator.parse(parseJson(text));
+
+      logger.info(context, "Gemini multimodal request completed", { attempt, model: DEFAULT_MODEL });
+
+      return { provider: "google-gemini", model: DEFAULT_MODEL, data };
+    } catch (error) {
+      if (attempt === 1) {
+        logger.warn(context, "Gemini multimodal request failed; retrying once", { error });
+        continue;
+      }
+
+      logger.error(context, "Gemini multimodal request failed; using local fallback", { error });
     }
   }
 

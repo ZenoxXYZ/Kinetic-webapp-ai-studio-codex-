@@ -122,6 +122,17 @@ type StudyPlanApiPayload = {
   };
 };
 
+type PhotoGradeApiPayload = {
+  provider: string;
+  model: string;
+  data: {
+    score: number;
+    correct: string[];
+    wrong: string[];
+    explanation: string;
+  };
+};
+
 const BRAND = "#1A56DB";
 const GREEN = "#0E9F6E";
 const RED = "#E02424";
@@ -448,6 +459,16 @@ async function postApi<T>(url: string, body: unknown): Promise<ApiResponse<T>> {
       },
     };
   }
+}
+
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(new Error("Could not read the selected image."));
+    reader.readAsDataURL(file);
+  });
 }
 
 function useKineticCountdown(dateTime: string) {
@@ -2199,6 +2220,12 @@ function PracticeScreen({
   const [complete, setComplete] = useState(false);
   const [practiceQuestions, setPracticeQuestions] = useState<Question[]>(questions);
   const [aiExamStatus, setAiExamStatus] = useState<"loading" | "ready" | "fallback">("loading");
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoMimeType, setPhotoMimeType] = useState<"image/jpeg" | "image/png" | "image/webp" | null>(null);
+  const [photoRubric, setPhotoRubric] = useState("");
+  const [photoGrade, setPhotoGrade] = useState<PhotoGradeApiPayload | null>(null);
+  const [photoGradeError, setPhotoGradeError] = useState("");
+  const [photoGradeLoading, setPhotoGradeLoading] = useState(false);
   const current = practiceQuestions[questionIndex] ?? questions[0];
   const xp = score * 10;
   const progress = ((questionIndex + 1) / practiceQuestions.length) * 100;
@@ -2274,6 +2301,70 @@ function PracticeScreen({
     setFlash(false);
     setConfetti(false);
     setComplete(false);
+  };
+
+  const selectPhoto = async (file: File | undefined) => {
+    setPhotoGrade(null);
+    setPhotoGradeError("");
+
+    if (!file) {
+      return;
+    }
+
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setPhotoGradeError("Upload a JPEG, PNG, or WebP image.");
+      setPhotoPreview(null);
+      setPhotoMimeType(null);
+      return;
+    }
+
+    if (file.size > 6 * 1024 * 1024) {
+      setPhotoGradeError("Image is too large. Please upload an image under 6MB.");
+      setPhotoPreview(null);
+      setPhotoMimeType(null);
+      return;
+    }
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      setPhotoPreview(dataUrl);
+      setPhotoMimeType(file.type as "image/jpeg" | "image/png" | "image/webp");
+    } catch {
+      setPhotoGradeError("Could not read the selected image. Try another photo.");
+    }
+  };
+
+  const gradePhoto = async () => {
+    if (!photoPreview || !photoMimeType) {
+      setPhotoGradeError("Upload a photo of your handwritten answer first.");
+      return;
+    }
+
+    const rubric = photoRubric.trim() || current.prompt;
+
+    if (rubric.length < 8) {
+      setPhotoGradeError("Add the question or grading rubric before submitting.");
+      return;
+    }
+
+    setPhotoGradeLoading(true);
+    setPhotoGradeError("");
+    setPhotoGrade(null);
+
+    const payload = await postApi<PhotoGradeApiPayload>("/api/photo-grade", {
+      imageBase64: photoPreview,
+      mimeType: photoMimeType,
+      rubric,
+    });
+
+    setPhotoGradeLoading(false);
+
+    if (!payload.success) {
+      setPhotoGradeError(payload.error.message || "Kinetic AI could not grade this image. Try again.");
+      return;
+    }
+
+    setPhotoGrade(payload.data);
   };
 
   const moveNext = useCallback(() => {
@@ -2430,6 +2521,103 @@ function PracticeScreen({
         </div>
         <p className="text-xl font-black leading-8 text-white">{current.prompt}</p>
       </motion.div>
+
+      <div className="rounded-2xl border border-blue-400/20 bg-[#1E293B] p-4 shadow-[0_18px_50px_rgba(2,6,23,0.26)]">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-black text-white">Photo Upload + AI Grading</p>
+            <p className="mt-1 text-xs font-bold leading-5 text-slate-400">
+              Upload handwritten work and Kinetic AI will grade it against the question.
+            </p>
+          </div>
+          <span className="rounded-full bg-blue-500/15 px-3 py-1 text-xs font-black text-blue-200">
+            Gemini vision
+          </span>
+        </div>
+
+        <label className="mt-4 block cursor-pointer rounded-2xl border border-dashed border-blue-300/30 bg-slate-900/45 p-4 text-center transition hover:border-blue-300/60">
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            className="sr-only"
+            onChange={(event) => {
+              void selectPhoto(event.target.files?.[0]);
+              event.currentTarget.value = "";
+            }}
+          />
+          {photoPreview ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={photoPreview}
+              alt="Uploaded handwritten answer preview"
+              className="mx-auto max-h-56 w-full rounded-2xl object-contain"
+            />
+          ) : (
+            <div className="py-4">
+              <Sparkles className="mx-auto size-6 text-blue-200" />
+              <p className="mt-2 text-sm font-black text-white">Choose answer photo</p>
+              <p className="mt-1 text-xs font-bold text-slate-500">JPEG, PNG, or WebP under 6MB</p>
+            </div>
+          )}
+        </label>
+
+        <textarea
+          value={photoRubric}
+          onChange={(event) => setPhotoRubric(event.target.value)}
+          placeholder={`Rubric or question. Default: ${current.prompt}`}
+          className="mt-3 min-h-24 w-full resize-none rounded-2xl border border-white/5 bg-slate-900/70 p-3 text-sm font-bold leading-6 text-white outline-none ring-blue-400/30 placeholder:text-slate-500 focus:ring-4"
+        />
+
+        {photoGradeError ? (
+          <p className="mt-3 rounded-2xl bg-red-500/10 p-3 text-sm font-bold leading-6 text-red-100">
+            {photoGradeError}
+          </p>
+        ) : null}
+
+        {photoGrade ? (
+          <div className="mt-3 rounded-2xl bg-slate-900/55 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.14em] text-blue-200">
+                  {photoGrade.provider === "google-gemini" ? "Graded by Gemini" : "Fallback result"}
+                </p>
+                <p className="mt-1 text-3xl font-black text-white">{photoGrade.data.score}/100</p>
+              </div>
+              <div className="h-14 w-14 rounded-full border-4 border-blue-400/40 bg-blue-500/15 text-center text-sm font-black leading-[48px] text-blue-100">
+                {photoGrade.data.score}
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-2xl bg-green-500/10 p-3">
+                <p className="text-xs font-black uppercase tracking-[0.12em] text-green-200">Correct</p>
+                <ul className="mt-2 space-y-2 text-sm font-bold leading-5 text-green-50">
+                  {(photoGrade.data.correct.length ? photoGrade.data.correct : ["No clear correct work detected."]).map(
+                    (item) => (
+                      <li key={item}>{item}</li>
+                    ),
+                  )}
+                </ul>
+              </div>
+              <div className="rounded-2xl bg-red-500/10 p-3">
+                <p className="text-xs font-black uppercase tracking-[0.12em] text-red-200">Needs Work</p>
+                <ul className="mt-2 space-y-2 text-sm font-bold leading-5 text-red-50">
+                  {(photoGrade.data.wrong.length ? photoGrade.data.wrong : ["No major issue listed."]).map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+            <p className="mt-3 rounded-2xl bg-blue-500/10 p-3 text-sm font-bold leading-6 text-blue-50">
+              {photoGrade.data.explanation}
+            </p>
+          </div>
+        ) : null}
+
+        <DemoButton className="mt-3 w-full" onClick={gradePhoto} disabled={photoGradeLoading}>
+          {photoGradeLoading ? "Grading handwriting..." : "Grade My Written Work"}
+        </DemoButton>
+      </div>
 
       <div className="space-y-3">
         {current.options.map((answer, index) => {
